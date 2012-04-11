@@ -15,6 +15,7 @@
 .Sh SYNOPSIS
 .Nm
 .Op Fl AVh
+.Op Fl c Ar count
 .Op Fl i Ar interval
 .Op Ar host Op ...
 .Sh DESCRIPTION
@@ -32,6 +33,9 @@ Print a bell character on stdout when a packet is missed.
 Print the "version" of xping and exit.
 .It Fl a
 Print a bell character on stdout on replies.
+.It Fl c Ar count
+Send count probes in a non-interactive fashion. Default is to operate
+interactively and keep sending probes.
 .It Fl h
 Display program usage and exit.
 .It Fl i Ar interval

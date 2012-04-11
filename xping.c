@@ -34,6 +34,7 @@
 int	i_interval = 1000;
 int	a_flag = 0;
 int	A_flag = 0;
+int	c_count = 0;
 
 /* Global structures */
 struct	event_base *ev_base;
@@ -41,6 +42,8 @@ struct	evdns_base *dns;
 char	outpacket[IP_MAXPACKET];
 int	datalen = 56;
 int	ident;
+int	target_count = 0;
+int	target_completed = 0;
 
 #define NUM 300
 #define SETRES(t,i,r) t->res[(t->npkts+i) % NUM] = r
@@ -54,6 +57,8 @@ struct target {
 	struct sockaddr_in sin;
 	int		npkts;
 	char		res[NUM+1];
+
+	struct event	*ev_write;
 
 	SLIST_ENTRY(target) entries;
 };
@@ -194,6 +199,16 @@ void write_packet(int fd, short what, void *thunk)
 		if (A_flag) write(STDOUT_FILENO, "\a", 1);
 	}
 
+	/* Check packet count limit */
+	if (c_count && t->npkts >= c_count) {
+		target_completed++;
+		event_del(t->ev_write);
+		if (target_completed >= target_count) {
+			event_base_loopexit(ev_base, NULL);
+		}
+		return;
+	}
+
 	/* Send packet */
 	len = ICMP_MINLEN + datalen;
 	icp = (struct icmp *)outpacket;
@@ -227,6 +242,8 @@ void redraw()
 	int y;
 
 	int i, imax, ifirst, ilast;
+
+	if (c_count) return;
 
 	getmaxyx(stdscr,row,col);
 	t = SLIST_FIRST(&head);
@@ -266,13 +283,35 @@ void redraw()
 	refresh();
 }
 
+void report()
+{
+	struct target *t;
+	int i, imax, ifirst, ilast;
+
+	t = SLIST_FIRST(&head);
+	if (t == NULL) return;
+
+	imax = MIN(t->npkts, NUM);
+	ifirst = (t->npkts > imax ? t->npkts - imax : 0);
+	ilast = t->npkts;
+
+	SLIST_FOREACH(t, &head, entries) {
+		fprintf(stdout, "%19.19s ", t->host);
+		for (i=ifirst; i<ilast; i++) {
+			if (i < t->npkts) fputc(t->res[i % NUM], stdout);
+			else fputc(' ', stdout);
+		}
+		fputc('\n', stdout);
+	}
+}
+
 void usage(const char *whine)
 {
         if (whine != NULL) {
                 fprintf(stderr, "%s\n", whine);
         }
 	fprintf(stderr,
-	    "usage: xping [-AVh] [-i interval] host [host [...]]\n"
+	    "usage: xping [-AVh] [-c count] [-i interval] host [host [...]]\n"
 	    "\n");
         exit(EX_USAGE);
 }
@@ -297,12 +336,15 @@ int main(int argc, char *argv[])
 	}
 
 	/* Parse command line options */
-	while ((ch = getopt(argc, argv, "Aai:")) != -1) {
+	while ((ch = getopt(argc, argv, "Aac:i:h")) != -1) {
 		switch(ch) {
 		case 'a':
 			a_flag = 1;
 		case 'A':
 			A_flag = 1;
+			break;
+		case 'c':
+			c_count = strtol(optarg, &end, 10);
 			break;
 		case 'i':
 			i_interval = strtod(optarg, &end) * 1000;
@@ -359,6 +401,8 @@ int main(int argc, char *argv[])
 		ev = event_new(ev_base, fd, EV_PERSIST,
 		    write_packet, t);
 		event_add(ev, &tv);
+		t->ev_write = ev;
+		target_count++;
 		usleep(100*1000);
 	}
 
@@ -374,9 +418,10 @@ int main(int argc, char *argv[])
 		}
 	}
 
-	initscr();
+	if (!c_count) initscr();
 	event_base_dispatch(ev_base);
-	endwin();
+	if (!c_count) endwin();
+	else report();
 
 	close(fd);
 	return 0;
