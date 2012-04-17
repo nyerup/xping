@@ -2,11 +2,13 @@
 # PMake
 #
 
+LIBEVENT=libevent-2.0.18-stable
+
 PREFIX=/usr/local
 SBINPATH=$(PREFIX)/bin
 MANPATH=$(PREFIX)/man
-CFLAGS=-Wall -Werror -I./libevent-2.0.9-rc -I./libevent-2.0.9-rc/include
-LDFLAGS=-L./libevent-2.0.9-rc/.libs
+CFLAGS=-Wall -Werror -I./$(LIBEVENT) -I./$(LIBEVENT)/include
+LDFLAGS=-L./$(LIBEVENT)/.libs
 LIBS=-lcurses libevent.a -lrt
 
 all: xping xping.8.gz
@@ -15,17 +17,17 @@ ncurses-dev:
 	sudo aptitude install ncurses-dev
 
 libevent.a:
-	wget http://monkey.org/~provos/libevent-2.0.9-rc.tar.gz
-	tar -xzvf libevent-2.0.9-rc.tar.gz
-	cd libevent-2.0.9-rc && ./configure && make
-	cp ./libevent-2.0.9-rc/.libs/libevent.a .
+	test -f $(LIBEVENT).tar.gz || wget https://github.com/downloads/libevent/libevent/$(LIBEVENT).tar.gz
+	test -d $(LIBEVENT) || tar -xzvf $(LIBEVENT).tar.gz
+	cd $(LIBEVENT) && ./configure && make
+	cp ./$(LIBEVENT)/.libs/libevent.a .
 	size libevent.a
-	
-xping: libevent.a xping.o 
+
+xping: libevent.a xping.o
 	gcc $(LDFLAGS) -g -o xping xping.o $(LIBS)
 
 xping.8.gz: xping.8
-	cat xping.8 | gzip > xping.8.gz
+	gzip < xping.8 > xping.8.gz
 
 xping.8.txt: xping.8
 	groff -mman -Tascii xping.8 | sed 's/.//g' > xping.8.txt

@@ -77,10 +77,10 @@ static void redraw();
 static u_short in_cksum(u_short *, int);
 
 
-// struct in_addr *in_addrs = addresses; 
+// struct in_addr *in_addrs = addresses;
 // struct in6_addr *in6_addrs = addresses;
 void resolved_host(int result, char type, int count, int ttl, void *addresses,
-    void *thunk) 
+    void *thunk)
 {
 	struct target *t = thunk;
 
@@ -110,7 +110,7 @@ void read_packet(int fd, short what, void *thunk)
 	salen = sizeof(sin);
 	memset(inpacket, 0, sizeof(inpacket));
 	n = recvfrom(fd, inpacket, sizeof(inpacket), 0,
-	    (struct sockaddr *)&sin, &salen); 
+	    (struct sockaddr *)&sin, &salen);
 	if (n < 0) {
 		stats->recvfrom_err++;
 		return;
@@ -136,7 +136,7 @@ void read_packet(int fd, short what, void *thunk)
 				break;
 			}
 		}
-		if (t == NULL) 
+		if (t == NULL)
 			return; /* reply from unknown src */
 
 		/* XXX Checksum is propably verified by host OS */
@@ -162,7 +162,7 @@ void read_packet(int fd, short what, void *thunk)
 				break;
 			}
 		}
-		if (t == NULL) 
+		if (t == NULL)
 			return; /* original target is unknown */
 
 		if (icp->icmp_type == ICMP_UNREACH) {
@@ -235,20 +235,34 @@ void write_packet(int fd, short what, void *thunk)
 	redraw();
 }
 
+void write_first_packet(int fd, short what, void *thunk)
+{
+	struct target *t = thunk;
+	struct event *ev;
+	struct timeval tv;
+
+	write_packet(fd, what, thunk);
+	tv.tv_sec = i_interval / 1000;
+	tv.tv_usec = i_interval % 1000 * 1000;
+	ev = event_new(ev_base, fd, EV_PERSIST, write_packet, thunk);
+	event_add(ev, &tv);
+	t->ev_write = ev;
+}
+
 void redraw()
 {
 	struct target *t;
-	int row, col;
+	int col;
 	int y;
 
 	int i, imax, ifirst, ilast;
 
 	if (c_count) return;
 
-	getmaxyx(stdscr,row,col);
 	t = SLIST_FIRST(&head);
 	if (t == NULL) return;
 
+	col = getmaxx(stdscr);
 	imax = MIN(t->npkts, col - 20);
 	imax = MIN(imax, NUM);
 	ifirst = (t->npkts > imax ? t->npkts - imax : 0);
@@ -276,7 +290,7 @@ void redraw()
 	mvprintw(y++, 0, "Runt: %d", stats->runt);
 	mvprintw(y++, 0, "Othr: %d", stats->other);
 	y++;
-	mvprintw(y++, 0, "Legend recv: .=echoreply ?=noreply #=unreach %=other"); 
+	mvprintw(y++, 0, "Legend recv: .=echoreply ?=noreply #=unreach %=other");
 	mvprintw(y++, 0, "       send: @=resolving !=partial $=other");
 	move(y++, 0);
 
@@ -336,10 +350,11 @@ int main(int argc, char *argv[])
 	}
 
 	/* Parse command line options */
-	while ((ch = getopt(argc, argv, "Aac:i:h")) != -1) {
+	while ((ch = getopt(argc, argv, "Aac:i:hV")) != -1) {
 		switch(ch) {
 		case 'a':
 			a_flag = 1;
+			break;
 		case 'A':
 			A_flag = 1;
 			break;
@@ -354,7 +369,8 @@ int main(int argc, char *argv[])
 				usage("Dangerous interval");
 			break;
 		case 'V':
-			fprintf(stderr, "version %s\n", VERSION);
+			fprintf(stderr, "%s\n", VERSION);
+			return (0);
 		case 'h':
 			usage(NULL);
 			/* NOTREACHED */
@@ -395,15 +411,14 @@ int main(int argc, char *argv[])
 		strncat(t->host, argv[i], sizeof(t->host) - 1);
 		SLIST_INSERT_HEAD(&head, t, entries);
 	}
-	tv.tv_sec = i_interval / 1000;
-	tv.tv_usec = i_interval % 1000 * 1000;
+	tv.tv_sec = 0;
+	tv.tv_usec = 0;
 	SLIST_FOREACH(t, &head, entries) {
-		ev = event_new(ev_base, fd, EV_PERSIST,
-		    write_packet, t);
+		ev = event_new(ev_base, fd, 0, write_first_packet, t);
 		event_add(ev, &tv);
-		t->ev_write = ev;
-		target_count++;
-		usleep(100*1000);
+		tv.tv_usec += 100*1000; /* target spacing: 100ms */
+		tv.tv_sec += (tv.tv_usec >= 1000000 ? 1 : 0);
+		tv.tv_usec -= (tv.tv_usec >= 1000000 ? 1000000 : 0);
 	}
 
 	/* Resolve hostnames */
