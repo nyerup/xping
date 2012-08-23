@@ -50,7 +50,7 @@ char	outpacket6[IP_MAXPACKET];
 int	datalen = 56;
 int	ident;
 int	target_count = 0;
-int	target_completed = 0;
+int	target_completed_count = 0;
 
 #define ICMP6ECHOLEN 8
 #define NUM 300
@@ -119,6 +119,19 @@ struct target *findtarget(int af, void *address)
 		return NULL;
 	}
 	return (t);
+}
+
+int target_completed(struct target *t)
+{
+	if (c_count && t->npkts >= c_count) {
+		target_completed_count++;
+		if (t->ev_write != NULL)
+			event_del(t->ev_write);
+		if (target_completed_count >= target_count)
+			event_base_loopexit(ev_base, NULL);
+		return 1;
+	}
+	return 0;
 }
 
 void resolved_host(int result, char type, int count, int ttl, void *addresses,
@@ -345,22 +358,16 @@ void write_packet(int fd, short what, void *thunk)
 	int len;
 	int n;
 
-	/* Check packet count limit */
-	if (c_count && t->npkts >= c_count) {
-		target_completed++;
-		event_del(t->ev_write);
-		if (target_completed >= target_count) {
-			event_base_loopexit(ev_base, NULL);
-		}
-		return;
-	}
-
 	/* Register missed reply */
 	if (t->npkts > 0 && GETRES(t, -1) == ' ') {
 		SETRES(t, -1, '?');
 		if (A_flag)
 			write(STDOUT_FILENO, "\a", 1);
 	}
+
+	/* Check packet count limit */
+	if (c_count && target_completed(t))
+		return;
 
 	/* Send protocol packet */
 	if (sa(t)->sa_family == AF_INET6) {
@@ -396,6 +403,10 @@ void write_first_packet(int fd, short what, void *thunk)
 
 	/* Register unresolved missed packets */
 	if (!t->resolved) {
+		/* Check packet count limit */
+		if (c_count && target_completed(t))
+			return;
+
 		ev = event_new(ev_base, fd4, 0, write_first_packet, thunk);
 		event_add(ev, &tv);
 		if (t->npkts > 0) {
